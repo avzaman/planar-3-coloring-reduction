@@ -1,0 +1,9 @@
+# wheel with 6 spokes plus an extra vertex adjacent to three rim vertices
+h: r0 r1 r2 r3 r4 r5
+r0: h r5 q r1
+r1: h r0 q r2
+r2: h r1 q r3
+r3: h r2 r4
+r4: h r3 r5
+r5: h r4 q r0
+q: r5 r2 r1 r0

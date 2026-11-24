@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planar 3-Coloring → Planar Max-Degree-4 3-Coloring</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/aaaakshat/cm-web-fonts@latest/fonts.css">
+<style>
+  :root{
+    --bg:#212121; --panel:#292929; --line:#3c3c3c; --txt:#ECECEC; --muted:#A8A8A8;
+    --blue:#58C4DD; --green:#83C167; --gold:#F0AC5F; --red:#FC6255; --yellow:#F4D345;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font-family:"Computer Modern Serif","CMU Serif","Latin Modern Roman",Georgia,serif;}
+  header{padding:18px 24px 6px}
+  h1{font-weight:400;font-size:26px;margin:0}
+  h1 .arrow{color:var(--yellow);padding:0 6px}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 24px}
+  select,button{font:inherit;font-size:16px;color:var(--txt);background:#303030;border:1px solid #4a4a4a;
+       border-radius:6px;padding:6px 12px;cursor:pointer}
+  button:hover:not(:disabled),select:hover{border-color:var(--yellow)}
+  button:disabled{opacity:.4;cursor:default}
+  #desc{color:var(--muted);font-size:16px}
+  #uploadNote{color:var(--muted);font-size:14px;padding:6px 24px 0}
+  #uploadNote code{font-family:"Computer Modern Typewriter",ui-monospace,monospace;color:#d8d8d8}
+  #status{margin:4px 24px 0;padding:10px 14px;border-left:3px solid var(--line);font-size:17px;min-height:44px}
+  #status.ok{border-color:var(--green)} #status.no{border-color:var(--red)}
+  main{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:14px 24px 28px}
+  @media (max-width:900px){main{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+  .panel h2{font-weight:400;font-size:20px;margin:0 0 4px}
+  .panel h2 small{color:var(--muted);font-size:15px}
+  svg.viz{width:100%;height:340px;display:block;background:#242424;border-radius:8px}
+  .verdict{font-size:16px;margin:8px 0 2px;min-height:22px}
+  h3{font-weight:400;font-size:16px;color:var(--muted);margin:12px 0 4px}
+  table.params{border-collapse:collapse;font-size:15px;width:100%}
+  table.params td{padding:3px 8px;border-bottom:1px solid #333}
+  table.params td:first-child{color:var(--muted);width:55%}
+  pre{font-family:"Computer Modern Typewriter","CMU Typewriter Text",ui-monospace,Menlo,monospace;font-size:13.5px;
+      background:#1b1b1b;border:1px solid #333;border-radius:6px;padding:10px;margin:0;
+      max-height:190px;overflow:auto;line-height:1.45;color:#d8d8d8}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:14px;padding:0 24px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:12px;height:12px;border-radius:50%;display:inline-block}
+</style>
+</head>
+<body>
+<header>
+  <h1>Planar 3-Coloring <span class="arrow">→</span> Planar Max-Degree-4 3-Coloring</h1>
+</header>
+
+<div class="controls">
+  <label for="ex">Example:</label>
+  <select id="ex"></select>
+  <button id="solve">Solve G′</button>
+  <button id="recover" disabled>Recover coloring of G</button>
+  <button id="reset">Reset</button>
+  <button id="uploadBtn">Upload file…</button>
+  <input type="file" id="file" accept=".txt,.graph,text/plain" hidden>
+  <button id="download">Download this input</button>
+  <span id="desc"></span>
+</div>
+<div class="legend">
+  <span><i class="sw" style="border:2px solid var(--yellow)"></i>port</span>
+  <span><i class="sw" style="background:rgba(244,211,69,.25);border:1px dashed var(--yellow);border-radius:3px"></i>gadget</span>
+  <span><i class="sw" style="border:2px solid var(--red)"></i>degree &gt; 4</span>
+</div>
+<div id="uploadNote">Upload a text file in the same format as the “File encoding” box: one line per vertex, <code>vertex: neighbors in clockwise order</code>, lines starting with # are comments. Limits: at most 16 vertices, 40 edges, degree 10. Everything runs in your browser; nothing is uploaded anywhere.</div>
+<div id="status">Pick an example, then press “Solve G′”.</div>
+
+<main>
+  <section class="panel">
+    <h2>Input <small>— planar graph G</small></h2>
+    <svg class="viz" id="vizIn"></svg>
+    <div class="verdict" id="verdictIn"></div>
+    <h3>Parameters</h3>
+    <table class="params" id="paramsIn"></table>
+    <h3>File encoding <small>(vertex: neighbors in clockwise order)</small></h3>
+    <pre id="fileIn"></pre>
+  </section>
+  <section class="panel">
+    <h2>Reduced <small>— planar graph G′, max degree 4</small></h2>
+    <svg class="viz" id="vizOut"></svg>
+    <div class="verdict" id="verdictOut"></div>
+    <h3>Parameters</h3>
+    <table class="params" id="paramsOut"></table>
+    <h3>File encoding <small>(vertex: neighbors in clockwise order)</small></h3>
+    <pre id="fileOut"></pre>
+  </section>
+</main>
+
+<script id="core">
+// ======================= core logic (no DOM) =======================
+const COLORS = ['#58C4DD', '#83C167', '#F0AC5F'];   // k1, k2, k3
+
+function wheel(k, r = 40) {
+  const nodes = [{ id: 'h', x: 0, y: 0 }], edges = [];
+  for (let i = 0; i < k; i++) {
+    const a = Math.PI / 2 - 2 * Math.PI * i / k;
+    nodes.push({ id: 'r' + i, x: r * Math.cos(a), y: r * Math.sin(a) });
+    edges.push(['h', 'r' + i], ['r' + i, 'r' + ((i + 1) % k)]);
+  }
+  return { nodes, edges };
+}
+const EXAMPLES = [
+  { name: 'Wheel, 6 spokes', desc: 'Center vertex has degree 6 → one block. Even rim: 3-colorable.', ...wheel(6) },
+  { name: 'Wheel, 5 spokes', desc: 'Center vertex has degree 5 → one block. Odd rim: NOT 3-colorable.', ...wheel(5) },
+  { name: 'Slide graph', desc: 'Two vertices of degree 5 → two gadgets (joined by an edge). 3-colorable.',
+    nodes: [{id:'A',x:-47,y:-11},{id:'B',x:47,y:-11},{id:'C',x:0,y:30},{id:'D',x:0,y:-4},
+            {id:'E',x:16,y:9},{id:'F',x:-16,y:9},{id:'G',x:0,y:-32}],
+    edges: [['A','B'],['B','C'],['C','A'],['D','E'],['E','F'],['F','D'],['A','D'],['A','F'],
+            ['B','D'],['B','E'],['C','E'],['C','F'],['G','A'],['G','B']] },
+  { name: 'Wheel, 7 spokes', desc: 'Center vertex has degree 7 → two blocks. Odd rim: NOT 3-colorable.', ...wheel(7) },
+  { name: 'Wheel, 8 spokes', desc: 'Center vertex has degree 8 → two blocks. Even rim: 3-colorable.', ...wheel(8) },
+];
+
+function buildAdj(g) {
+  const adj = new Map(g.nodes.map(n => [n.id, []]));
+  for (const [a, b] of g.edges) { adj.get(a).push(b); adj.get(b).push(a); }
+  return adj;
+}
+const posOf = g => new Map(g.nodes.map(n => [n.id, n]));
+// neighbors sorted clockwise (math coords, y up), starting from straight up
+function rotation(g) {
+  if (g.rot) return g.rot;
+  const adj = buildAdj(g), P = posOf(g), rot = new Map();
+  for (const [v, ns] of adj) {
+    const p = P.get(v);
+    const key = u => { const q = P.get(u); let a = Math.atan2(q.x - p.x, q.y - p.y); return a < 0 ? a + 2 * Math.PI : a; };
+    rot.set(v, [...ns].sort((a, b) => key(a) - key(b)));
+  }
+  return rot;
+}
+function encode(g, title) {
+  const rot = rotation(g);
+  const lines = [`# ${title}`, `# n = ${g.nodes.length}, m = ${g.edges.length}`];
+  for (const n of g.nodes) lines.push(`${n.id}: ${rot.get(n.id).join(' ')}`);
+  return lines.join('\n');
+}
+// Faces of the embedding given by the rotation system; planar embedding iff V - E + F = 2 (connected graph)
+function faces(g) {
+  const rot = rotation(g), seen = new Set(), out = [];
+  for (const [u, ns] of rot) for (const v of ns) {
+    if (seen.has(u + '>' + v)) continue;
+    const face = []; let a = u, b = v;
+    while (!seen.has(a + '>' + b)) {
+      seen.add(a + '>' + b); face.push(a);
+      const r = rot.get(b), i = r.indexOf(a);
+      const c = r[(i + 1) % r.length]; a = b; b = c;
+    }
+    out.push(face);
+  }
+  return out;
+}
+function isPlanarEmbedding(g) { return g.nodes.length - g.edges.length + faces(g).length === 2; }
+function params(g) {
+  const adj = buildAdj(g); const degs = [...adj.values()].map(a => a.length);
+  return { n: g.nodes.length, m: g.edges.length, maxDeg: Math.max(...degs),
+           high: degs.filter(d => d > 4).length, planar: isPlanarEmbedding(g) };
+}
+
+// --------------- the reduction ---------------
+// Gadget for a vertex of degree d > 4: chain of k = ceil((d-4)/2) blocks.
+// Block = two diamonds sharing a tip + top edge m1-m2 + port p below (adjacent to n1, n2).
+// Ports: first tip t0, last tip t_2k (2 free slots each) and every p_b (2 free slots each).
+function reduce(g) {
+  const adj = buildAdj(g), P = posOf(g), rot = rotation(g);
+  const out = { nodes: [], edges: [], gadgets: [] };
+  const keep = new Set(g.nodes.filter(n => adj.get(n.id).length <= 4).map(n => n.id));
+  for (const n of g.nodes) if (keep.has(n.id)) out.nodes.push({ ...n });
+  const slotOf = new Map();                 // `${v}|${u}` -> node id in G' that takes edge v-u on v's side
+  for (const n of g.nodes) {
+    if (keep.has(n.id)) continue;
+    const v = n.id, d = adj.get(v).length, k = Math.ceil((d - 4) / 2), D = 2 * k;
+    // size: fit inside a fraction of the distance to the closest neighbor
+    const minDist = Math.min(...adj.get(v).map(u => Math.hypot(P.get(u).x - n.x, P.get(u).y - n.y)));
+    const halfW = (k > 1 ? 0.64 : 0.52) * minDist, step = (2 * halfW) / D, h = Math.min(step * 0.75, halfW * 0.42);
+    // orientation: gadget's port-free top side faces the widest gap between neighbors
+    const angs = rot.get(v).map(u => Math.atan2(P.get(u).y - n.y, P.get(u).x - n.x)).sort((a, b) => a - b);
+    let best = -1, bis = Math.PI / 2;
+    for (let i = 0; i < angs.length; i++) {
+      const a = angs[i], b = i + 1 < angs.length ? angs[i + 1] : angs[0] + 2 * Math.PI;
+      if (b - a > best) { best = b - a; bis = (a + b) / 2; }
+    }
+    const th = bis - Math.PI / 2;           // rotate local +y onto the gap bisector
+    const place = (lx, ly) => ({ x: n.x + lx * Math.cos(th) - ly * Math.sin(th), y: n.y + lx * Math.sin(th) + ly * Math.cos(th) });
+    const id = s => `${v}.${s}`;
+    const gnodes = [];
+    const add = (s, lx, ly, role) => { const q = place(lx, ly); const o = { id: id(s), x: q.x, y: q.y, gadget: v, role }; out.nodes.push(o); gnodes.push(o); };
+    for (let j = 0; j <= D; j++) add('t' + j, -halfW + j * step, 0, (j === 0 || j === D) ? 'port' : 'tip');
+    for (let j = 1; j <= D; j++) { add('m' + j, -halfW + (j - .5) * step, h, 'mid'); add('n' + j, -halfW + (j - .5) * step, -h, 'mid'); }
+    for (let b = 1; b <= k; b++) add('p' + b, -halfW + (2 * b - 1) * step, -2.1 * h, 'port');
+    const E = (a, b) => out.edges.push([id(a), id(b)]);
+    for (let j = 1; j <= D; j++) { E('t' + (j - 1), 'm' + j); E('t' + (j - 1), 'n' + j); E('t' + j, 'm' + j); E('t' + j, 'n' + j); E('m' + j, 'n' + j); }
+    for (let b = 1; b <= k; b++) { E('m' + (2 * b - 1), 'm' + (2 * b)); E('p' + b, 'n' + (2 * b - 1)); E('p' + b, 'n' + (2 * b)); }
+    // slots in counter-clockwise boundary order: t_D, t0, p1..pk (2 each)
+    const slots = ['t' + D, 't' + D, 't0', 't0'];
+    for (let b = 1; b <= k; b++) slots.push('p' + b, 'p' + b);
+    const sAng = slots.map(s => { const q = gnodes.find(o => o.id === id(s)); return Math.atan2(q.y - n.y, q.x - n.x); });
+    // neighbors in counter-clockwise order; choose cyclic shift + skipped slot minimizing angular mismatch
+    const nb = [...rot.get(v)].reverse();
+    const nAng = nb.map(u => Math.atan2(P.get(u).y - n.y, P.get(u).x - n.x));
+    const dAng = (a, b) => { let x = Math.abs(a - b) % (2 * Math.PI); return Math.min(x, 2 * Math.PI - x); };
+    let bestCost = Infinity, bestMap = null;
+    const skips = slots.length > d ? [...slots.keys()] : [-1];
+    for (const sk of skips) {
+      const use = slots.map((s, i) => i).filter(i => i !== sk);
+      for (let r = 0; r < d; r++) {
+        let c = 0; for (let i = 0; i < d; i++) c += dAng(nAng[(i + r) % d], sAng[use[i]]);
+        if (c < bestCost) { bestCost = c; bestMap = use.map((si, i) => [nb[(i + r) % d], id(slots[si])]); }
+      }
+    }
+    for (const [u, s] of bestMap) slotOf.set(`${v}|${u}`, s);
+    out.gadgets.push({ v, d, k, nodes: gnodes.map(o => o.id), ports: gnodes.filter(o => o.role === 'port').map(o => o.id) });
+  }
+  for (const [a, b] of g.edges) {
+    const A = keep.has(a) ? a : slotOf.get(`${a}|${b}`), B = keep.has(b) ? b : slotOf.get(`${b}|${a}`);
+    out.edges.push([A, B]);
+  }
+  return out;
+}
+
+// --------------- 3-coloring solver (backtracking, most-constrained first) ---------------
+function solve3(g, maxSteps = 3e6) {
+  const adj = buildAdj(g), ids = g.nodes.map(n => n.id), col = new Map();
+  let steps = 0, gaveUp = false;
+  function pick() {
+    let bestV = null, bestKey = null;
+    for (const v of ids) if (!col.has(v)) {
+      const used = new Set(adj.get(v).filter(u => col.has(u)).map(u => col.get(u)));
+      const key = [used.size, adj.get(v).length];
+      if (!bestKey || key[0] > bestKey[0] || (key[0] === bestKey[0] && key[1] > bestKey[1])) { bestKey = key; bestV = v; }
+    }
+    return bestV;
+  }
+  function bt() {
+    const v = pick(); if (v === null) return true;
+    for (let c = 0; c < 3; c++) {
+      if (++steps > maxSteps) { gaveUp = true; return true; }
+      if (adj.get(v).some(u => col.get(u) === c)) continue;
+      col.set(v, c); if (bt()) return true; col.delete(v);
+    }
+    return false;
+  }
+  const ok = bt();
+  if (gaveUp) return { coloring: null, steps, gaveUp: true };
+  return ok ? { coloring: col, steps } : { coloring: null, steps };
+}
+function validColoring(g, col) { return g.edges.every(([a, b]) => col.get(a) !== col.get(b)); }
+function recover(g, red, colOut) {
+  const col = new Map();
+  for (const n of g.nodes) {
+    const gd = red.gadgets.find(x => x.v === n.id);
+    col.set(n.id, colOut.get(gd ? gd.ports[0] : n.id));
+  }
+  return col;
+}
+// --------------- uploaded files: same format as the examples ---------------
+const LIMITS = { n: 16, m: 40, maxDeg: 10, bytes: 4000 };
+function parseInstance(text) {
+  if (text.length > LIMITS.bytes) throw new Error(`File too large (max ${LIMITS.bytes} characters).`);
+  const rot = new Map(), order = [];
+  text.split(/\r?\n/).forEach((raw, i) => {
+    const line = raw.replace(/#.*$/, '').trim(); if (!line) return;
+    const m = line.match(/^([A-Za-z0-9_]{1,8})\s*:\s*(.*)$/);
+    if (!m) throw new Error(`Line ${i + 1}: expected "vertex: neighbor neighbor ...", got "${raw.trim()}".`);
+    const v = m[1], ns = m[2].trim() ? m[2].trim().split(/\s+/) : [];
+    if (rot.has(v)) throw new Error(`Line ${i + 1}: vertex "${v}" is listed twice.`);
+    for (const u of ns) {
+      if (!/^[A-Za-z0-9_]{1,8}$/.test(u)) throw new Error(`Line ${i + 1}: bad vertex name "${u}" (use letters, digits, _; max 8 chars).`);
+      if (u === v) throw new Error(`Line ${i + 1}: self-loop on "${v}" is not allowed.`);
+    }
+    if (new Set(ns).size !== ns.length) throw new Error(`Line ${i + 1}: "${v}" lists a neighbor twice.`);
+    if (ns.length === 0) throw new Error(`Line ${i + 1}: "${v}" has no neighbors.`);
+    rot.set(v, ns); order.push(v);
+  });
+  if (order.length < 3) throw new Error('Need at least 3 vertices.');
+  if (order.length > LIMITS.n) throw new Error(`Too many vertices: ${order.length} (max ${LIMITS.n}).`);
+  const edges = [];
+  for (const v of order) for (const u of rot.get(v)) {
+    if (!rot.has(u)) throw new Error(`"${v}" lists neighbor "${u}", which has no line of its own.`);
+    if (!rot.get(u).includes(v)) throw new Error(`Edge ${v}–${u} is listed by ${v} but not by ${u} (the graph is undirected).`);
+    if (v < u) edges.push([v, u]);
+  }
+  if (edges.length > LIMITS.m) throw new Error(`Too many edges: ${edges.length} (max ${LIMITS.m}).`);
+  const md = Math.max(...order.map(v => rot.get(v).length));
+  if (md > LIMITS.maxDeg) throw new Error(`Max degree ${md} is too large (max ${LIMITS.maxDeg}).`);
+  // connected
+  const seen = new Set([order[0]]), st = [order[0]];
+  while (st.length) for (const u of rot.get(st.pop())) if (!seen.has(u)) { seen.add(u); st.push(u); }
+  if (seen.size !== order.length) throw new Error('The graph must be connected.');
+  const g = { nodes: order.map(id => ({ id })), edges, rot };
+  if (!isPlanarEmbedding(g)) throw new Error('The clockwise neighbor orders do not describe a planar drawing (V − E + F ≠ 2). Either the graph is not planar, or some neighbor list is out of order.');
+  layout(g);
+  return g;
+}
+// Tutte (barycentric) layout: largest face on a circle, every other vertex at the average of its neighbors
+function layout(g) {
+  const F = faces(g); let outer = F.reduce((a, b) => (b.length > a.length ? b : a));
+  outer = [...new Set(outer)];
+  const P = new Map(), fixed = new Set(outer);
+  outer.forEach((v, i) => { const a = Math.PI / 2 + 2 * Math.PI * i / outer.length; P.set(v, { x: 40 * Math.cos(a), y: 40 * Math.sin(a) }); });
+  for (const n of g.nodes) if (!fixed.has(n.id)) P.set(n.id, { x: 0, y: 0 });
+  for (let it = 0; it < 2000; it++) for (const n of g.nodes) {
+    if (fixed.has(n.id)) continue;
+    const ns = g.rot.get(n.id); let x = 0, y = 0;
+    for (const u of ns) { x += P.get(u).x; y += P.get(u).y; }
+    P.set(n.id, { x: x / ns.length, y: y / ns.length });
+  }
+  for (const n of g.nodes) Object.assign(n, P.get(n.id));
+  // make the drawing's clockwise order agree with the file (mirror if it came out reversed)
+  const drawn = rotation({ nodes: g.nodes, edges: g.edges });
+  const same = (a, b) => { if (a.length < 3) return null; const i = b.indexOf(a[0]); return a.every((x, k) => b[(i + k) % b.length] === x); };
+  let votes = 0;
+  for (const [v, r] of g.rot) { const d = drawn.get(v); const s1 = same(r, d), s2 = same(r, [...d].reverse()); if (s1) votes++; else if (s2) votes--; }
+  if (votes < 0) for (const n of g.nodes) n.x = -n.x;
+  return g;
+}
+function drawingCrossings(g) {
+  const P = posOf(g), E = g.edges; let c = 0;
+  const ccw = (a, b, q) => (q.y - a.y) * (b.x - a.x) - (b.y - a.y) * (q.x - a.x);
+  for (let i = 0; i < E.length; i++) for (let j = i + 1; j < E.length; j++) {
+    const [a, b] = E[i], [p, q] = E[j]; if (new Set([a, b, p, q]).size < 4) continue;
+    const A = P.get(a), B = P.get(b), C = P.get(p), D = P.get(q);
+    if (ccw(A, B, C) * ccw(A, B, D) < 0 && ccw(C, D, A) * ccw(C, D, B) < 0) c++;
+  }
+  return c;
+}
+if (typeof module !== 'undefined') module.exports = { EXAMPLES, reduce, solve3, validColoring, recover, params, encode, buildAdj, rotation, parseInstance, isPlanarEmbedding, drawingCrossings, LIMITS };
+</script>
+
+<script>
+// ======================= UI =======================
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+let cur = null;   // { g, red, colIn, colOut }
+
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; }
+
+function draw(svg, g, opts = {}) {
+  svg.innerHTML = '';
+  const xs = g.nodes.map(n => n.x), ys = g.nodes.map(n => n.y);
+  const pad = 9, minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad, minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad;
+  svg.setAttribute('viewBox', `${minX} ${-maxY} ${maxX - minX} ${maxY - minY}`);
+  const span = Math.max(maxX - minX, maxY - minY);
+  const R = span * (opts.rScale || 0.028), P = new Map(g.nodes.map(n => [n.id, n]));
+  const col = opts.coloring, adj = buildAdj(g);
+  for (const gd of (opts.gadgets || [])) {
+    const pts = gd.nodes.map(i => P.get(i)); const gx = pts.map(p => p.x), gy = pts.map(p => p.y);
+    const m = R * 2.2, x0 = Math.min(...gx) - m, y0 = Math.min(...gy) - m;
+    el('rect', { x: x0, y: -(Math.max(...gy) + m), width: Math.max(...gx) - x0 + m, height: Math.max(...gy) - y0 + m,
+      rx: R * 2, fill: 'rgba(244,211,69,0.10)', stroke: '#F4D345', 'stroke-width': R * 0.22, 'stroke-dasharray': `${R * 0.6} ${R * 0.45}` }, svg);
+  }
+  for (const [a, b] of g.edges) {
+    const p = P.get(a), q = P.get(b);
+    const bad = col && col.has(a) && col.get(a) === col.get(b);
+    el('line', { x1: p.x, y1: -p.y, x2: q.x, y2: -q.y, stroke: bad ? '#FC6255' : '#A8A8A8', 'stroke-width': R * (bad ? 0.45 : 0.24), 'stroke-linecap': 'round' }, svg);
+  }
+  for (const n of g.nodes) {
+    const grp = el('g', {}, svg);
+    el('title', {}, grp).textContent = `${n.id}  (degree ${adj.get(n.id).length})`;
+    if (n.role === 'port') el('circle', { cx: n.x, cy: -n.y, r: R * 1.6, fill: 'none', stroke: '#F4D345', 'stroke-width': R * 0.3 }, grp);
+    if (opts.markHigh && adj.get(n.id).length > 4) el('circle', { cx: n.x, cy: -n.y, r: R * 1.6, fill: 'none', stroke: '#FC6255', 'stroke-width': R * 0.3 }, grp);
+    const c = col && col.has(n.id) ? COLORS[col.get(n.id)] : '#2C2C2C';
+    el('circle', { cx: n.x, cy: -n.y, r: R, fill: c, stroke: col && col.has(n.id) ? '#151515' : '#D6D6D6', 'stroke-width': R * 0.18 }, grp);
+    if (opts.labels) {
+      const ns = adj.get(n.id).map(u => P.get(u)); let dx = n.x - ns.reduce((s, q) => s + q.x, 0) / ns.length, dy = n.y - ns.reduce((s, q) => s + q.y, 0) / ns.length;
+      let L = Math.hypot(dx, dy); if (L < 1e-6) { dx = 0.7; dy = 0.7; L = 1; }
+      const lx = n.x + dx / L * R * 2.6, ly = n.y + dy / L * R * 2.6;
+      const t = el('text', { x: lx, y: -ly + R * 0.5, 'font-size': R * 1.5, fill: '#A8A8A8', 'text-anchor': 'middle', 'font-family': 'Computer Modern Serif, serif' }, grp); t.textContent = n.id; }
+  }
+}
+function paramTable(tbl, rows) { tbl.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join(''); }
+
+let uploaded = null;
+function load(i) {
+  const ex = i === 'up' ? uploaded : EXAMPLES[i];
+  const g = ex.g || { nodes: ex.nodes, edges: ex.edges };
+  const red = reduce(g);
+  cur = { g, red, colIn: null, colOut: null, name: ex.name };
+  $('desc').textContent = ex.desc;
+  const pi = params(g), po = params(red);
+  paramTable($('paramsIn'), [['vertices n', pi.n], ['edges m', pi.m], ['max degree Δ', pi.maxDeg],
+    ['vertices with degree > 4', pi.high], ['colors k', 3], ['planar embedding (V − E + F = 2)', pi.planar ? 'yes ✓' : 'no ✗']]);
+  paramTable($('paramsOut'), [['vertices n′', po.n], ['edges m′', po.m], ['max degree Δ′', po.maxDeg],
+    ['gadgets (one per degree > 4 vertex)', red.gadgets.length],
+    ['blocks per gadget', red.gadgets.map(x => `${x.v}: ${x.k}`).join(', ') || '—'],
+    ['colors k', 3], ['planar embedding (V − E + F = 2)', po.planar ? 'yes ✓' : 'no ✗']]);
+  $('fileIn').textContent = encode(g, 'planar 3-COL instance G');
+  $('fileOut').textContent = encode(red, 'planar max-degree-4 3-COL instance G′');
+  $('verdictIn').textContent = ''; $('verdictOut').textContent = '';
+  $('recover').disabled = true;
+  setStatus('', 'Pick an example, then press “Solve G′”.');
+  if (i === 'up' && drawingCrossings(red)) setStatus('', 'Note: the automatic drawing of G′ has overlapping edges, but G′ is still planar (see the check in its parameters). Press “Solve G′”.');
+  render();
+}
+function render() {
+  draw($('vizIn'), cur.g, { coloring: cur.colIn, markHigh: true, labels: true });
+  draw($('vizOut'), cur.red, { coloring: cur.colOut, gadgets: cur.red.gadgets, rScale: 0.022 });
+}
+function setStatus(cls, html) { const s = $('status'); s.className = cls; s.innerHTML = html; }
+
+$('solve').onclick = () => {
+  const { coloring, steps, gaveUp } = solve3(cur.red);
+  if (gaveUp) {
+    setStatus('no', `The solver gave up after ${steps.toLocaleString()} steps. Try a smaller input.`);
+    return;
+  }
+  if (coloring) {
+    cur.colOut = coloring; cur.colIn = null;
+    $('verdictOut').innerHTML = `<span style="color:var(--green)">✓ valid 3-coloring found</span> <span style="color:var(--muted)">(${steps} solver steps)</span>`;
+    $('verdictIn').textContent = '';
+    $('recover').disabled = false;
+    setStatus('ok', 'G′ is 3-colorable. In each gadget, all the ports share one color. Press “Recover coloring of G”.');
+  } else {
+    cur.colOut = null; cur.colIn = null;
+    const direct = solve3(cur.g);
+    $('verdictOut').innerHTML = `<span style="color:var(--red)">✗ no valid 3-coloring exists</span> <span style="color:var(--muted)">(${steps} solver steps)</span>`;
+    $('verdictIn').innerHTML = `<span style="color:var(--red)">✗ no valid 3-coloring</span> <span style="color:var(--muted)">(checked directly: ${direct.coloring ? 'FOUND ONE?!' : 'none'})</span>`;
+    $('recover').disabled = true;
+    setStatus('no', 'G′ has no 3-coloring, so G has none either. (If G had one, coloring each gadget with its vertex’s color would give one for G′.)');
+  }
+  render();
+};
+$('recover').onclick = () => {
+  cur.colIn = recover(cur.g, cur.red, cur.colOut);
+  const ok = validColoring(cur.g, cur.colIn);
+  $('verdictIn').innerHTML = ok ? '<span style="color:var(--green)">✓ recovered coloring is valid</span>'
+                                : '<span style="color:var(--red)">✗ recovered coloring invalid</span>';
+  setStatus(ok ? 'ok' : 'no', 'Recovered: each vertex that wasn’t replaced keeps its color, and each replaced vertex takes the color of its gadget’s ports.');
+  render();
+};
+$('reset').onclick = () => load($('ex').value === 'up' ? 'up' : +$('ex').value);
+$('uploadBtn').onclick = () => $('file').click();
+$('file').onchange = async () => {
+  const f = $('file').files[0]; $('file').value = '';
+  if (!f) return;
+  if (f.size > LIMITS.bytes) { setStatus('no', `Could not load “${esc(f.name)}”: file too large (max ${LIMITS.bytes} characters).`); return; }
+  try {
+    const g = parseInstance(await f.text());
+    uploaded = { name: 'Uploaded: ' + f.name, desc: `From your file (${g.nodes.length} vertices, ${g.edges.length} edges).`, g };
+    let o = [...$('ex').options].find(o => o.value === 'up');
+    if (!o) { o = document.createElement('option'); o.value = 'up'; $('ex').appendChild(o); }
+    o.textContent = uploaded.name; $('ex').value = 'up';
+    load('up');
+    setStatus('', `Loaded “${esc(f.name)}”. The layout was computed automatically. Press “Solve G′”.`);
+  } catch (e) {
+    setStatus('no', `Could not load “${esc(f.name)}”: ${esc(e.message)}`);
+  }
+};
+$('download').onclick = () => {
+  const blob = new Blob([$('fileIn').textContent + '\n'], { type: 'text/plain' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = (cur.name || 'graph').replace(/^Uploaded: /, '').replace(/\.txt$/, '').replace(/[^A-Za-z0-9]+/g, '_') + '.txt';
+  a.click(); URL.revokeObjectURL(a.href);
+};
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+EXAMPLES.forEach((e, i) => { const o = document.createElement('option'); o.value = i; o.textContent = e.name; $('ex').appendChild(o); });
+$('ex').onchange = () => load($('ex').value === 'up' ? 'up' : +$('ex').value);
+load(0);
+</script>
+</body>
+</html>
